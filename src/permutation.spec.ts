@@ -22,3 +22,11 @@ test.each([permutations, permutations2, permutations3])(
     expect(actual).toStrictEqual(expect.arrayContaining(expected));
   }
 );
+
+test.each([permutations, permutations2, permutations3])(
+  "%o should generate 1296 permutations for 6 choices and length of 4",
+  (permutationFn) => {
+    const actual = permutationFn([1, 2, 3, 4, 5, 6], 4);
+    expect(actual).toHaveLength(1296);
+  }
+);

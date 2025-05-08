@@ -1,3 +1,4 @@
+// seems to perform worse than the other two
 export function permutations(
   choices: number[],
   permutationLength: number
@@ -20,13 +21,13 @@ export function permutations(
   return permutations;
 }
 
-export function permutations2(
-  choices: number[],
+export function permutations2<T extends number = number>(
+  choices: T[],
   permutationLength: number
-): number[][] {
-  const permutations: number[][] = [];
+): T[][] {
+  const permutations: T[][] = [];
 
-  function helper(current: number[]) {
+  function helper(current: T[]) {
     if (current.length === permutationLength) {
       permutations.push([...current]);
       return;
