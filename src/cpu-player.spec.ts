@@ -146,6 +146,10 @@ class GuessGenerator<T extends number> {
 
   private candidates: Combination<T>[];
 
+  private guessStrat: () => Combination<T>;
+
+  private allCombinations: Combination<T>[] = [];
+
   constructor(choices: T[], permutationLength: number) {
     this.choices = choices;
     this.permutationLength = permutationLength;
@@ -154,9 +158,11 @@ class GuessGenerator<T extends number> {
     this.candidates = permutations2(choices, permutationLength).map(
       (combination) => new Combination(combination)
     );
+    this.guessStrat = this.naiveGuess;
   }
 
   next(): Combination<T> {
+    if (this.candidates.length === 1) return this.candidates[0];
     if (this.candidates.length === this.totalPossibilities) {
       const half = Math.floor(this.permutationLength / 2);
       const combination = new Array(half)
@@ -165,11 +171,64 @@ class GuessGenerator<T extends number> {
       return new Combination(combination);
     }
 
-    return this.naiveGuess();
+    return this.guessStrat();
+  }
+
+  strat(s: "naive" | "minmax"): void {
+    if (s === "naive") {
+      this.guessStrat = this.naiveGuess;
+    } else {
+      this.guessStrat = this.minMaxGuess;
+
+      this.allCombinations = permutations2(
+        [...this.choices],
+        this.permutationLength
+      ).map((c) => new Combination(c));
+    }
   }
 
   private naiveGuess(): Combination<T> {
     return this.candidates[0];
+  }
+
+  static readonly possibleFeedbacks: ReadonlyArray<Feedback> = [
+    { correct: 0, misplaced: 0 },
+    { correct: 0, misplaced: 1 },
+    { correct: 0, misplaced: 2 },
+    { correct: 0, misplaced: 3 },
+    { correct: 0, misplaced: 4 },
+    { correct: 1, misplaced: 0 },
+    { correct: 1, misplaced: 1 },
+    { correct: 1, misplaced: 2 },
+    { correct: 1, misplaced: 3 },
+    { correct: 2, misplaced: 0 },
+    { correct: 2, misplaced: 1 },
+    { correct: 2, misplaced: 2 },
+    { correct: 3, misplaced: 0 },
+    { correct: 4, misplaced: 0 },
+  ];
+
+  private minMaxGuess(): Combination<T> {
+    const maxCandidatesRemainingPerCombination = this.allCombinations.map(
+      (combination) => {
+        const maxRemainingCandidates = Math.max(
+          ...GuessGenerator.possibleFeedbacks.map(
+            (feedback) =>
+              narrowCandidates(this.candidates, combination, feedback).length
+          )
+        );
+        return [combination, maxRemainingCandidates] as [
+          Combination<T>,
+          number
+        ];
+      }
+    );
+
+    return maxCandidatesRemainingPerCombination.reduce(
+      (previousValue, newValue) => {
+        return newValue[1] < previousValue[1] ? newValue : previousValue;
+      }
+    )[0];
   }
 
   acceptFeedback(guess: Combination<T>, feedback: Feedback): void {
@@ -188,12 +247,50 @@ describe("guess generator", () => {
     console.log(permutations2([1, 2, 3], 2));
   });
 
+  describe("2 choices, size 2", () => {
+    const size = 2;
+    const choices: Color[] = [1, 2];
+
+    describe("secret = 12, guess = 11", () => {
+      const secret = new Combination([1, 2]);
+      const guess = new Combination([1, 1]);
+
+      test("next guess is 12 or 21", () => {
+        const guessGenerator = new GuessGenerator<Color>(choices, size);
+        const feedback = secret.compare(guess);
+
+        guessGenerator.acceptFeedback(guess, feedback);
+        const nextGuess = guessGenerator.next();
+
+        const possibleSolutions = [
+          new Combination([1, 2]),
+          new Combination([2, 1]),
+        ];
+        expect(possibleSolutions).toContainEqual(nextGuess);
+      });
+    });
+
+    describe("secret = 22, guess = 11", () => {
+      const secret = new Combination<Color>([2, 2]);
+      const guess = new Combination([1, 1]);
+
+      test("next guess is 22", () => {
+        const guessGenerator = new GuessGenerator<Color>(choices, size);
+        const feedback = secret.compare(guess);
+        guessGenerator.acceptFeedback(guess, feedback);
+
+        expect(guessGenerator.next()).toStrictEqual(new Combination([2, 2]));
+      });
+    });
+  });
+
   describe("3 choices and size 2", () => {
+    const size = 2;
+    const choices: Color[] = [1, 2, 3];
+
     test("first guess should be 12", () => {
-      const size = 2;
-      const guessGenerator = new GuessGenerator<Color>([1, 2, 3], size);
-      const guess = guessGenerator.next();
-      expect(guess).toStrictEqual(new Combination([1, 2]));
+      const guessGenerator = new GuessGenerator<Color>(choices, size);
+      expect(guessGenerator.next()).toStrictEqual(new Combination([1, 2]));
     });
 
     test("check assert works", () => {
@@ -204,25 +301,8 @@ describe("guess generator", () => {
       const secret = new Combination<Color>([3, 3]);
 
       test("finds the solution", () => {
-        let tries = 2;
-        const size = 2;
-        const guessGenerator = new GuessGenerator<Color>([1, 2, 3], size);
-        let found = false;
-        while (tries-- > 0) {
-          const guess = guessGenerator.next();
-
-          // console.log("tries", tries, "guess", guess, "secret", secret);
-          try {
-            assert.deepEqual(secret, guess);
-            found = true;
-            break;
-          } catch (e) {}
-
-          const feedback = secret.compare(guess);
-          guessGenerator.acceptFeedback(guess, feedback);
-        }
-
-        expect(found).toBe(true);
+        const guessGenerator = new GuessGenerator<Color>(choices, size);
+        expect(findSolution(guessGenerator, secret, 2)).toBe(true);
       });
     });
 
@@ -230,24 +310,8 @@ describe("guess generator", () => {
       const secret = new Combination<Color>([2, 3]);
 
       test("finds the solution", () => {
-        let tries = 2;
-        const size = 2;
         const guessGenerator = new GuessGenerator<Color>([1, 2, 3], size);
-        let found = false;
-        while (tries-- > 0) {
-          const guess = guessGenerator.next();
-
-          try {
-            assert.deepEqual(secret, guess);
-            found = true;
-            break;
-          } catch (e) {}
-
-          const feedback = secret.compare(guess);
-          guessGenerator.acceptFeedback(guess, feedback);
-        }
-
-        expect(found).toBe(true);
+        expect(findSolution(guessGenerator, secret, 3)).toBe(true);
       });
     });
 
@@ -255,64 +319,27 @@ describe("guess generator", () => {
       const secret = new Combination<Color>([2, 3]);
 
       test("finds the solution", () => {
-        let tries = 2;
-        const size = 2;
         const guessGenerator = new GuessGenerator<Color>([1, 2, 3], size);
-        let found = false;
-        while (tries-- > 0) {
-          const guess = guessGenerator.next();
-
-          try {
-            assert.deepEqual(secret, guess);
-            found = true;
-            break;
-          } catch (e) {}
-
-          const feedback = secret.compare(guess);
-          guessGenerator.acceptFeedback(guess, feedback);
-        }
-
-        expect(found).toBe(true);
+        expect(findSolution(guessGenerator, secret, 2)).toBe(true);
       });
     });
   });
 
   describe("6 choices and size 2", () => {
+    const size = 2;
+    const choices: Color[] = [1, 2, 3, 4, 5, 6];
+
     test("first guess should be 12", () => {
-      const size = 2;
-      const guessGenerator = new GuessGenerator<Color>(
-        [1, 2, 3, 4, 5, 6],
-        size
-      );
-      const guess = guessGenerator.next();
-      expect(guess).toStrictEqual(new Combination([1, 2]));
+      const guessGenerator = new GuessGenerator<Color>(choices, size);
+      expect(guessGenerator.next()).toStrictEqual(new Combination([1, 2]));
     });
 
     describe("secret = 51", () => {
       const secret = new Combination<Color>([5, 1]);
 
       test("finds the solution", () => {
-        let tries = 4;
-        const size = 2;
-        const guessGenerator = new GuessGenerator<Color>(
-          [1, 2, 3, 4, 5, 6],
-          size
-        );
-        let found = false;
-        while (tries-- > 0) {
-          const guess = guessGenerator.next();
-
-          try {
-            assert.deepEqual(secret, guess);
-            found = true;
-            break;
-          } catch {}
-
-          const feedback = secret.compare(guess);
-          guessGenerator.acceptFeedback(guess, feedback);
-        }
-
-        expect(found).toBe(true);
+        const guessGenerator = new GuessGenerator<Color>(choices, size);
+        expect(findSolution(guessGenerator, secret, 4)).toBe(true);
       });
     });
   });
@@ -323,129 +350,82 @@ describe("guess generator", () => {
 
     test("first guess should be 1122", () => {
       const guessGenerator = new GuessGenerator<Color>(choices, size);
-      const guess = guessGenerator.next();
-      expect(guess).toStrictEqual(new Combination([1, 1, 2, 2]));
+      expect(guessGenerator.next()).toStrictEqual(
+        new Combination([1, 1, 2, 2])
+      );
     });
 
     describe("secret = 2222", () => {
       const secret = new Combination<Color>([2, 2, 2, 2]);
 
       test("finds the solution", () => {
-        let tries = 4;
         const guessGenerator = new GuessGenerator<Color>(choices, size);
-        let found = false;
-        while (tries-- > 0) {
-          const guess = guessGenerator.next();
-
-          try {
-            assert.deepEqual(secret, guess);
-            found = true;
-            break;
-          } catch {}
-
-          const feedback = secret.compare(guess);
-          guessGenerator.acceptFeedback(guess, feedback);
-        }
-
-        expect(found).toBe(true);
+        expect(findSolution(guessGenerator, secret, 4)).toBe(true);
       });
     });
   });
+
   describe("6 choices and size 4", () => {
     const size = 4;
     const choices: Color[] = [1, 2, 3, 4, 5, 6] as const;
 
     test("first guess should be 1122", () => {
       const guessGenerator = new GuessGenerator<Color>(choices, size);
-      const guess = guessGenerator.next();
-      expect(guess).toStrictEqual(new Combination([1, 1, 2, 2]));
+      expect(guessGenerator.next()).toStrictEqual(
+        new Combination([1, 1, 2, 2])
+      );
     });
 
     describe("secret = 2222", () => {
       const secret = new Combination<Color>([2, 2, 2, 2]);
 
       test("finds the solution", () => {
-        let tries = 4;
         const guessGenerator = new GuessGenerator<Color>(choices, size);
-        let found = false;
-        while (tries-- > 0) {
-          const guess = guessGenerator.next();
-
-          try {
-            assert.deepEqual(secret, guess);
-            found = true;
-            break;
-          } catch {}
-
-          const feedback = secret.compare(guess);
-          guessGenerator.acceptFeedback(guess, feedback);
-        }
-
-        expect(found).toBe(true);
+        expect(findSolution(guessGenerator, secret, 4)).toBe(true);
       });
     });
 
     describe("secret = 6422", () => {
       const secret = new Combination<Color>([6, 4, 2, 2]);
 
-      test("finds the solution", () => {
-        let tries = 7;
+      test("naive - finds the solution in 7 tries", () => {
         const guessGenerator = new GuessGenerator<Color>(choices, size);
-        let found = false;
-        while (tries-- > 0) {
-          const guess = guessGenerator.next();
+        expect(findSolution(guessGenerator, secret, 7)).toBe(true);
+      });
 
-          try {
-            assert.deepEqual(secret, guess);
-            found = true;
-            break;
-          } catch {}
-
-          const feedback = secret.compare(guess);
-          guessGenerator.acceptFeedback(guess, feedback);
-        }
-
-        expect(found).toBe(true);
+      test("minmax - finds the solution in 5 tries", () => {
+        const guessGenerator = new GuessGenerator<Color>(choices, size);
+        guessGenerator.strat("minmax");
+        expect(findSolution(guessGenerator, secret, 5)).toBe(true);
       });
     });
-  });
-  describe("secret = 12, guess = 11", () => {
-    test("next guess is 12 or 21", () => {
-      const size = 2;
-      const guessGenerator = new GuessGenerator<Color>([1, 2], size);
-      const secret = new Combination([1, 2]);
-      const guess = new Combination([1, 1]);
-      const feedback = secret.compare(guess);
-      guessGenerator.acceptFeedback(guess, feedback);
-      const guess1 = guessGenerator.next();
-      const possibleSolutions = [
-        new Combination([1, 2]),
-        new Combination([2, 1]),
-      ];
 
-      expect(possibleSolutions).toContainEqual(guess1);
+    test(`generate a Combination of size ${size}`, () => {
+      const guessGenerator = new GuessGenerator<Color>(choices, size);
+      expect(guessGenerator.next().size).toBe(size);
     });
-  });
-
-  describe("secret = 22, guess = 11", () => {
-    test("next guess is 22", () => {
-      const size = 2;
-      const guessGenerator = new GuessGenerator<Color>([1, 2], size);
-      const secret = new Combination<Color>([2, 2]);
-      const guess = new Combination([1, 1]);
-      const feedback = secret.compare(guess);
-      guessGenerator.acceptFeedback(guess, feedback);
-      const guess1 = guessGenerator.next();
-
-      expect(guess1).toStrictEqual(new Combination([2, 2]));
-    });
-  });
-
-  test("generate a Combination of size 4", () => {
-    const size = 4;
-    const guessGenerator = new GuessGenerator<Color>([1, 2, 3, 4, 5, 6], size);
-    const guess = guessGenerator.next();
-    expect(guess).toBeInstanceOf(Combination);
-    expect(guess.size).toBe(size);
   });
 });
+
+function findSolution<T extends number>(
+  generator: GuessGenerator<T>,
+  secret: Combination<T>,
+  maxTries: number
+): boolean {
+  let tries = maxTries;
+  let found = false;
+  while (tries-- > 0) {
+    const guess = generator.next();
+
+    console.log("try", maxTries - tries, "guess", guess, "secret", secret);
+    try {
+      assert.deepEqual(secret, guess);
+      found = true;
+      break;
+    } catch (e) {}
+
+    const feedback = secret.compare(guess);
+    generator.acceptFeedback(guess, feedback);
+  }
+  return found;
+}
