@@ -1,6 +1,12 @@
 import type { Feedback } from "./model";
 import { Combination } from "./model";
 import { permutations2 } from "./permutations";
+import { randInt } from "./random";
+
+export const NAIVE = 1;
+export const RANDOM = 2;
+export const MINMAX = 3;
+type PlayerStrategy = typeof NAIVE | typeof RANDOM | typeof MINMAX;
 
 export class GuessGenerator<T extends number> {
   private choices: ReadonlyArray<T>;
@@ -38,21 +44,35 @@ export class GuessGenerator<T extends number> {
     return this.guessStrat();
   }
 
-  strat(s: "naive" | "minmax"): void {
-    if (s === "naive") {
-      this.guessStrat = this.naiveGuess;
-    } else {
-      this.guessStrat = this.minMaxGuess;
+  acceptFeedback(guess: Combination<T>, feedback: Feedback): void {
+    this.candidates = narrowCandidates(this.candidates, guess, feedback);
+  }
 
-      this.allCombinations = permutations2(
-        [...this.choices],
-        this.permutationLength
-      ).map((c) => new Combination(c));
+  strategy(s: PlayerStrategy): void {
+    switch (s) {
+      case NAIVE:
+        this.guessStrat = this.naiveGuess;
+        break;
+      case MINMAX:
+        this.guessStrat = this.minMaxGuess;
+        this.allCombinations = permutations2(
+          [...this.choices],
+          this.permutationLength
+        ).map((c) => new Combination(c));
+        break;
+      case RANDOM:
+        this.guessStrat = this.randomGuess;
+        break;
     }
   }
 
   private naiveGuess(): Combination<T> {
     return this.candidates[0];
+  }
+
+  private randomGuess(): Combination<T> {
+    const i = randInt(0, this.candidates.length - 1);
+    return this.candidates[i];
   }
 
   static readonly possibleFeedbacks: ReadonlyArray<Feedback> = [
@@ -93,10 +113,6 @@ export class GuessGenerator<T extends number> {
         return newValue[1] < previousValue[1] ? newValue : previousValue;
       }
     )[0];
-  }
-
-  acceptFeedback(guess: Combination<T>, feedback: Feedback): void {
-    this.candidates = narrowCandidates(this.candidates, guess, feedback);
   }
 }
 /**

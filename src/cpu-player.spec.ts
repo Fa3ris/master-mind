@@ -1,10 +1,10 @@
 import { test, describe, expect, assert } from "vitest";
 import { permutations2 } from "./permutations";
 
-import { randomInt } from "crypto";
+import { randomInt } from "node:crypto";
 import type { Color } from "./model";
 import { Combination } from "./model";
-import { GuessGenerator, narrowCandidates } from "./cpu-player";
+import { GuessGenerator, MINMAX, narrowCandidates, RANDOM } from "./cpu-player";
 
 describe("narrow candidates list", () => {
   describe("2 choices and size 2", () => {
@@ -88,7 +88,7 @@ describe(`${GuessGenerator.name}`, () => {
       const secret = new Combination([1, 2]);
       const guess = new Combination([1, 1]);
 
-      test("next guess is 12 or 21", () => {
+      test("naive - next guess is 12 or 21", () => {
         const guessGenerator = new GuessGenerator<Color>(choices, size);
         const feedback = secret.compare(guess);
 
@@ -100,6 +100,26 @@ describe(`${GuessGenerator.name}`, () => {
           new Combination([2, 1]),
         ];
         expect(possibleSolutions).toContainEqual(nextGuess);
+      });
+
+      test("random - next guess is 12 or 21", () => {
+        const guessGenerator = new GuessGenerator<Color>(choices, size);
+        guessGenerator.strategy(RANDOM);
+        const feedback = secret.compare(guess);
+
+        guessGenerator.acceptFeedback(guess, feedback);
+        const nextGuess = guessGenerator.next();
+
+        const possibleSolutions = [
+          new Combination([1, 2]),
+          new Combination([2, 1]),
+        ];
+        expect(possibleSolutions).toContainEqual(nextGuess);
+
+        const kSamples = 10;
+        const samples = [...Array(kSamples)].map(() => guessGenerator.next());
+        expect(samples).toContainEqual(new Combination([1, 2]));
+        expect(samples).toContainEqual(new Combination([2, 1]));
       });
     });
 
@@ -228,7 +248,7 @@ describe(`${GuessGenerator.name}`, () => {
 
       test("minmax - finds the solution in 5 tries", () => {
         const guessGenerator = new GuessGenerator<Color>(choices, size);
-        guessGenerator.strat("minmax");
+        guessGenerator.strategy(MINMAX);
         expect(findSolution(guessGenerator, secret, 5)).toBe(true);
       });
     });
@@ -243,7 +263,7 @@ describe(`${GuessGenerator.name}`, () => {
 
       test("minmax - finds the solution in 5 tries", () => {
         const guessGenerator = new GuessGenerator<Color>(choices, size);
-        guessGenerator.strat("minmax");
+        guessGenerator.strategy(MINMAX);
         expect(findSolution(guessGenerator, secret, 5)).toBe(true);
       });
     });
@@ -258,7 +278,7 @@ describe(`${GuessGenerator.name}`, () => {
     describe.each(combinationsToTest)(`secret %o`, (secret) => {
       test("minmax - finds the solution in at most 5 tries", () => {
         const guessGenerator = new GuessGenerator<Color>(choices, size);
-        guessGenerator.strat("minmax");
+        guessGenerator.strategy(MINMAX);
         expect(findSolution(guessGenerator, secret, 5)).toBe(true);
       });
     });
