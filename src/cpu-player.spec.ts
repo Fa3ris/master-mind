@@ -1,72 +1,10 @@
 import { test, describe, expect, assert } from "vitest";
 import { permutations2 } from "./permutations";
 
-type Color = 1 | 2 | 3 | 4 | 5 | 6;
-
-type Frequency<T extends number> = { [k in T]: number };
-
-class Combination<T extends number> {
-  private combination: ReadonlyArray<T>;
-
-  constructor(combination: ReadonlyArray<T>) {
-    this.combination = combination;
-  }
-
-  get size(): number {
-    return this.combination.length;
-  }
-
-  compare(other: Combination<T>): { correct: number; misplaced: number } {
-    const matchedIds = this.combination
-      .map((choice, index) =>
-        choice === other.combination[index] ? index : -1
-      )
-      .filter((index) => index !== -1);
-
-    const secretFrequencies = this.frequencies(matchedIds);
-    const misplaced = Object.entries<T>(
-      other.frequencies(matchedIds) as Record<string, T>
-    ).reduce<number>((acc, [color, count]) => {
-      const secretFrequency = secretFrequencies[Number(color) as T] ?? 0;
-      const misplacedForColor = Math.min(count, secretFrequency);
-      return acc + misplacedForColor;
-    }, 0);
-
-    return { correct: matchedIds.length, misplaced };
-  }
-
-  private frequencies(idsToIgnore: number[]): Partial<Frequency<T>> {
-    const potentialMisplacedChoices = this.combination.filter(
-      (_, index) => !idsToIgnore.includes(index)
-    );
-    return potentialMisplacedChoices.reduce<Partial<Frequency<T>>>(
-      (record, choice) => {
-        record[choice] = (record[choice] ?? 0) + 1;
-        return record;
-      },
-      {}
-    );
-  }
-}
-
-/**
- * keep only the candidates that match the feedback
- * @param candidates
- * @param guess
- * @param actualFeedback
- * @returns
- */
-function narrowCandidates<T extends number>(
-  candidates: Combination<T>[],
-  guess: Combination<T>,
-  { correct, misplaced }: Feedback
-) {
-  return candidates.filter((candidate) => {
-    const { correct: candidateCorrect, misplaced: candidateMisplaced } =
-      guess.compare(candidate);
-    return candidateCorrect === correct && candidateMisplaced === misplaced;
-  });
-}
+import { randomInt } from "crypto";
+import type { Color } from "./model";
+import { Combination } from "./model";
+import { GuessGenerator, narrowCandidates } from "./cpu-player";
 
 describe("narrow candidates list", () => {
   describe("2 choices and size 2", () => {
@@ -133,118 +71,13 @@ describe("narrow candidates list", () => {
   });
 });
 
-type Feedback = {
-  correct: number;
-  misplaced: number;
-};
-
-class GuessGenerator<T extends number> {
-  private choices: ReadonlyArray<T>;
-  private readonly permutationLength: number;
-
-  private readonly totalPossibilities: number;
-
-  private candidates: Combination<T>[];
-
-  private guessStrat: () => Combination<T>;
-
-  private allCombinations: Combination<T>[] = [];
-
-  constructor(choices: T[], permutationLength: number) {
-    this.choices = choices;
-    this.permutationLength = permutationLength;
-    this.totalPossibilities = choices.length ** permutationLength;
-
-    this.candidates = permutations2(choices, permutationLength).map(
-      (combination) => new Combination(combination)
-    );
-    this.guessStrat = this.naiveGuess;
-  }
-
-  next(): Combination<T> {
-    if (this.candidates.length === 1) return this.candidates[0];
-    if (this.candidates.length === this.totalPossibilities) {
-      const half = Math.floor(this.permutationLength / 2);
-      const combination = new Array(half)
-        .fill(this.choices[0])
-        .concat(new Array(this.permutationLength - half).fill(this.choices[1]));
-      return new Combination(combination);
-    }
-
-    return this.guessStrat();
-  }
-
-  strat(s: "naive" | "minmax"): void {
-    if (s === "naive") {
-      this.guessStrat = this.naiveGuess;
-    } else {
-      this.guessStrat = this.minMaxGuess;
-
-      this.allCombinations = permutations2(
-        [...this.choices],
-        this.permutationLength
-      ).map((c) => new Combination(c));
-    }
-  }
-
-  private naiveGuess(): Combination<T> {
-    return this.candidates[0];
-  }
-
-  static readonly possibleFeedbacks: ReadonlyArray<Feedback> = [
-    { correct: 0, misplaced: 0 },
-    { correct: 0, misplaced: 1 },
-    { correct: 0, misplaced: 2 },
-    { correct: 0, misplaced: 3 },
-    { correct: 0, misplaced: 4 },
-    { correct: 1, misplaced: 0 },
-    { correct: 1, misplaced: 1 },
-    { correct: 1, misplaced: 2 },
-    { correct: 1, misplaced: 3 },
-    { correct: 2, misplaced: 0 },
-    { correct: 2, misplaced: 1 },
-    { correct: 2, misplaced: 2 },
-    { correct: 3, misplaced: 0 },
-    { correct: 4, misplaced: 0 },
-  ];
-
-  private minMaxGuess(): Combination<T> {
-    const maxCandidatesRemainingPerCombination = this.allCombinations.map(
-      (combination) => {
-        const maxRemainingCandidates = Math.max(
-          ...GuessGenerator.possibleFeedbacks.map(
-            (feedback) =>
-              narrowCandidates(this.candidates, combination, feedback).length
-          )
-        );
-        return [combination, maxRemainingCandidates] as [
-          Combination<T>,
-          number
-        ];
-      }
-    );
-
-    return maxCandidatesRemainingPerCombination.reduce(
-      (previousValue, newValue) => {
-        return newValue[1] < previousValue[1] ? newValue : previousValue;
-      }
-    )[0];
-  }
-
-  acceptFeedback(guess: Combination<T>, feedback: Feedback): void {
-    this.candidates = narrowCandidates(this.candidates, guess, feedback);
-  }
-}
-
-describe("guess generator", () => {
+describe(`${GuessGenerator.name}`, () => {
   test("generate a Combination of size 2", () => {
     const size = 2;
     const guessGenerator = new GuessGenerator<Color>([1, 2], size);
     const guess = guessGenerator.next();
     expect(guess).toBeInstanceOf(Combination);
     expect(guess.size).toBe(size);
-
-    console.log(permutations2([1, 2, 3], 2));
   });
 
   describe("2 choices, size 2", () => {
@@ -284,7 +117,7 @@ describe("guess generator", () => {
     });
   });
 
-  describe("3 choices and size 2", () => {
+  describe("3 choices, size 2", () => {
     const size = 2;
     const choices: Color[] = [1, 2, 3];
 
@@ -325,7 +158,7 @@ describe("guess generator", () => {
     });
   });
 
-  describe("6 choices and size 2", () => {
+  describe("6 choices, size 2", () => {
     const size = 2;
     const choices: Color[] = [1, 2, 3, 4, 5, 6];
 
@@ -344,7 +177,7 @@ describe("guess generator", () => {
     });
   });
 
-  describe("2 choices and size 4", () => {
+  describe("2 choices, size 4", () => {
     const size = 4;
     const choices: Color[] = [1, 2] as const;
 
@@ -365,7 +198,7 @@ describe("guess generator", () => {
     });
   });
 
-  describe("6 choices and size 4", () => {
+  describe("6 choices, size 4", () => {
     const size = 4;
     const choices: Color[] = [1, 2, 3, 4, 5, 6] as const;
 
@@ -400,6 +233,36 @@ describe("guess generator", () => {
       });
     });
 
+    describe("secret = 6666", () => {
+      const secret = new Combination<Color>([6, 6, 6, 6]);
+
+      test("naive - finds the solution in 7 tries", () => {
+        const guessGenerator = new GuessGenerator<Color>(choices, size);
+        expect(findSolution(guessGenerator, secret, 7)).toBe(true);
+      });
+
+      test("minmax - finds the solution in 5 tries", () => {
+        const guessGenerator = new GuessGenerator<Color>(choices, size);
+        guessGenerator.strat("minmax");
+        expect(findSolution(guessGenerator, secret, 5)).toBe(true);
+      });
+    });
+
+    const numberOfTests = 1;
+    const combinationsToTest = pickKRandom(
+      permutations2(choices, size).map((c) => new Combination(c)),
+      numberOfTests
+    );
+
+    // warning: takes ~1.5 s per test
+    describe.each(combinationsToTest)(`secret %o`, (secret) => {
+      test("minmax - finds the solution in at most 5 tries", () => {
+        const guessGenerator = new GuessGenerator<Color>(choices, size);
+        guessGenerator.strat("minmax");
+        expect(findSolution(guessGenerator, secret, 5)).toBe(true);
+      });
+    });
+
     test(`generate a Combination of size ${size}`, () => {
       const guessGenerator = new GuessGenerator<Color>(choices, size);
       expect(guessGenerator.next().size).toBe(size);
@@ -417,7 +280,7 @@ function findSolution<T extends number>(
   while (tries-- > 0) {
     const guess = generator.next();
 
-    console.log("try", maxTries - tries, "guess", guess, "secret", secret);
+    // console.log("try", maxTries - tries, "guess", guess, "secret", secret);
     try {
       assert.deepEqual(secret, guess);
       found = true;
@@ -428,4 +291,20 @@ function findSolution<T extends number>(
     generator.acceptFeedback(guess, feedback);
   }
   return found;
+}
+
+function pickKRandom<T>(array: T[], k: number): T[] {
+  if (k > array.length) {
+    throw new Error("k cannot be larger than the array length");
+  }
+
+  const copied = [...array];
+
+  // Perform a partial Fisher–Yates shuffle
+  for (let i = 0; i < k; i++) {
+    const randomIndex = i + randomInt(copied.length - i);
+    [copied[i], copied[randomIndex]] = [copied[randomIndex], copied[i]];
+  }
+
+  return copied.slice(0, k);
 }
