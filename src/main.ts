@@ -64,16 +64,16 @@ const choices: Color[] = [1, 2, 3, 4, 5, 6];
 const size = 4;
 const combinationGenerator = new CombinationGenerator(choices, size);
 
+let playing = false;
 document
   .querySelector<HTMLButtonElement>(`#${triggerId}`)!
   .addEventListener("click", function startPlay() {
+    if (playing) return;
+    playing = true;
     const section = document.querySelector(`#${playSectionId}`)!;
-
     section.innerHTML = "";
 
     const secret = combinationGenerator.next();
-
-    const generator = new GuessGenerator<Color>(choices, size);
 
     const stratLabel =
       document.querySelector<HTMLSelectElement>(`#${configStratId}`)?.value ||
@@ -90,50 +90,110 @@ document
       default:
         playerStrategy = NAIVE;
     }
-    generator.strategy(playerStrategy);
 
     const maxTries: number = Number(
       document.querySelector<HTMLInputElement>(`#${configTriesId}`)?.value ?? 5
     );
 
-    let tries = maxTries;
+    // Use Web Worker only if the selected strategy is MINMAX to not block the browser.
+    if (playerStrategy === MINMAX) {
+      const worker = new Worker(new URL("./worker.ts", import.meta.url).href, {
+        type: "module",
+      });
+      // Initialize the worker with choices, board size and strategy.
+      worker.postMessage({
+        type: "init",
+        data: {
+          choices,
+          size,
+          strategy: playerStrategy,
+        },
+      });
 
-    function play() {
-      tries--;
-      const guess = generator.next();
+      let tries = maxTries;
 
-      const feedback = secret.compare(guess);
-      const div = document.createElement("div");
-      div.innerHTML = `guess ${maxTries - tries} ${guess} correct:${
-        feedback.correct
-      } misplaced:${feedback.misplaced}`;
-      section.append(div);
+      worker.onmessage = (e) => {
+        tries--;
 
-      if (feedback.correct === size) {
-        winState();
-        return;
+        const {
+          guess: { combination },
+        } = e.data;
+        // data is serialised as an Object so need to recreate Combination instance
+        const guess = new Combination<Color>(combination);
+        const feedback = secret.compare(guess);
+        const div = document.createElement("div");
+        div.innerHTML = `guess ${maxTries - tries} ${guess} correct:${
+          feedback.correct
+        } misplaced:${feedback.misplaced}`;
+        section.append(div);
+
+        if (feedback.correct === size) {
+          winState();
+          worker.terminate();
+          return;
+        }
+
+        if (tries <= 0) {
+          loseState();
+          worker.terminate();
+          return;
+        }
+
+        worker.postMessage({
+          type: "feedback",
+          data: { guess, feedback },
+        });
+
+        worker.postMessage({ type: "nextGuess" });
+      };
+
+      // Start by asking the worker for the first guess.
+      worker.postMessage({ type: "nextGuess" });
+    } else {
+      // For NAIVE or RANDOM strategy use the local generator and play loop.
+      const generator = new GuessGenerator<Color>(choices, size);
+      generator.strategy(playerStrategy);
+
+      let tries = maxTries;
+      function play() {
+        tries--;
+        const guess = generator.next();
+
+        const feedback = secret.compare(guess);
+        const div = document.createElement("div");
+        div.innerHTML = `guess ${maxTries - tries} ${guess} correct:${
+          feedback.correct
+        } misplaced:${feedback.misplaced}`;
+        section.append(div);
+
+        if (feedback.correct === size) {
+          winState();
+          return;
+        }
+
+        if (tries <= 0) {
+          loseState();
+          return;
+        }
+
+        generator.acceptFeedback(guess, feedback);
+        setTimeout(play);
       }
-
-      if (tries <= 0) {
-        loseState();
-        return;
-      }
-
-      generator.acceptFeedback(guess, feedback);
-      setTimeout(play);
+      play();
     }
 
     function winState() {
-      const div = document.createElement("div");
-      div.innerHTML = `WIN ✅ 🙌 secret was ${secret}`;
-      section.append(div);
+      endGameState(`WIN ✅ 🙌 secret was ${secret}`);
     }
 
     function loseState() {
-      const div = document.createElement("div");
-      div.innerHTML = `LOSE ❌ !! secret was ${secret}`;
-      section.append(div);
+      endGameState(`LOSE ❌ !! secret was ${secret}`);
     }
 
-    play();
+    function endGameState(message: string) {
+      const div = document.createElement("div");
+      div.innerHTML = message;
+      section.append(div);
+      playing = false;
+    }
   });
