@@ -268,6 +268,16 @@ describe(`${GuessGenerator.name}`, () => {
       });
     });
 
+    describe("secret = 3565", () => {
+      const secret = new Combination<Color>([3, 5, 6, 5]);
+
+      test("minmax - finds the solution in 5 tries", () => {
+        const guessGenerator = new GuessGenerator<Color>(choices, size);
+        guessGenerator.strategy(MINMAX);
+        expect(findSolution(guessGenerator, secret, 5)).toBe(true);
+      });
+    });
+
     const numberOfTests = 1;
     const combinationsToTest = pickKRandom(
       permutations2(choices, size).map((c) => new Combination(c)),

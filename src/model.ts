@@ -15,6 +15,10 @@ export class Combination<T extends number> {
     return this.combination.length;
   }
 
+  toString() {
+    return this.combination.join("");
+  }
+
   compare(other: Combination<T>): { correct: number; misplaced: number } {
     const matchedIds = this.combination
       .map((choice, index) =>

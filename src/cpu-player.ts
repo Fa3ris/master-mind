@@ -6,7 +6,7 @@ import { randInt } from "./random";
 export const NAIVE = 1;
 export const RANDOM = 2;
 export const MINMAX = 3;
-type PlayerStrategy = typeof NAIVE | typeof RANDOM | typeof MINMAX;
+export type PlayerStrategy = typeof NAIVE | typeof RANDOM | typeof MINMAX;
 
 export class GuessGenerator<T extends number> {
   private choices: ReadonlyArray<T>;
